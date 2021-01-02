@@ -1,86 +1,109 @@
+import * as d3 from 'd3'
+import data from './les-miserables.json'
+
+// To visualise how elements interact
+// in a network or a hierarchy
+
+const width = 600
+const height = 600
+
+// ordinal scale = colour coding; used for categories
+// https://github.com/d3/d3-scale#api-reference
+const scale = d3.scaleOrdinal(d3.schemeCategory10);
+
+// allow user to move the svg around
+const drag = simulation => {
   
-import * as d3 from 'd3' 
+  function dragstarted(event) {
+    if (!event.active) {
+      simulation
+        .alphaTarget(0.8) // https://medium.com/@sxywu/understanding-the-force-ef1237017d5
+        .restart()
+    }
+    event.subject.fx = event.subject.x;
+    event.subject.fy = event.subject.y;
+  }
 
-const data = [ 45, 67, 96, 84, 41, ]
+  function dragged(event) {
+    event.subject.fx = event.x;
+    event.subject.fy = event.y;
+  }
 
-const drawChart = function () {
-  const paddingOuter = 10 // number of pixels for padding CSS property of the container (svg element)
-  const paddingInner = 0.1 // done by d3, percentage of step width
-  const containerWidth = window.innerWidth - (2 * paddingOuter)
-  const containerHeight = window.innerHeight - (2 * paddingOuter)
-  const svgWidth = containerWidth
-  const maximum = d3.max(data, d => d)
+  function dragended(event) {
+    if (!event.active) simulation.alphaTarget(0);
+    event.subject.fx = null;
+    event.subject.fy = null;
+  }
 
-  // scale = visual encoding of position of quantitative data, such as mapping a measurement in meters to a position in pixels for dots in a scatterplot, volume to a bubble size, color to local prevalence, stroke width to revenue, symbol size to popularity; aka as function linking domain and range
-
-  // scale types
-  // - linear - for time series, x = f(y) relationships
-  // - sqroot - for circles
-  // - power - for curves
-  // - log - for datasets with outliers
-  // - symlog - for history and prognoses
-
-  // domain = (outer bounds of) dataset, input data
-  // range = (outer bounds of) output data, raw data translated to visual representation
-
-  const xScale = d3.scaleBand()
-    .domain(Object.keys(data))
-      .range([0, svgWidth]) // [left edge, right edge]
-      .round(false) // round start and stop of each band to integers
-      .paddingInner(paddingInner) // proportion of the range that is reserved for blank space between bands
-      .align(0.5) // center bands versus range
-
-  const step = xScale.step()
-  const barWidth = step - (paddingInner * step)
-  
-  const yScale = d3.scaleLinear()
-    .domain([0, maximum])
-    .range([0, containerHeight]) // [bottom edge, top edge], svg coordinates system is flipped
-
-  const selection = d3.select('svg')
-
-  const transition = selection.transition().duration(1000)
-
-  selection
-    .attr('width', () => svgWidth)
-    .attr('height', () => containerHeight)
-    .attr('style', () => `display: block; padding: ${paddingOuter}px;`)
-    .selectAll('rect')
-    .data(data, datum => `key-${datum}`) // key must be unique?, decides if node needs re-rendering on data change
-    .join(
-      // newly added nodes
-      enterSelection => {
-        // return so it can be joined with update selection
-        return enterSelection.append('rect')
-          // attributes to transition FROM
-          .attr('x', (datum, index) => xScale(index))
-          .attr('height', 0)
-          .attr('y', 0)
-          .attr('stroke-width', 3)
-          .attr('stroke-dasharray', '5 5')
-          .attr('stroke', 'darkblue')
-          .attr('fill', 'pink')
-        // set attributes etc. on only enter selection
-      },
-      update => update,
-      // newly removed nodes
-      exitSelection => {
-        exitSelection.transition(transition)
-          .attr('height', 0)
-          .attr('y', containerHeight)
-      }
-    )
-    .attr('width', barWidth)
-    // newly added nodes and newly updated nodes
-    .transition(transition)
-    // calculate x-position based index
-    .attr('x', (datum, index) => xScale(index))
-    // set height based on the bound datum
-    .attr('height', datum => yScale(datum))
-
+  return d3.drag()
+      .on("start", dragstarted)
+      .on("drag", dragged)
+      .on("end", dragended)
 }
 
+const links = data.links.map(d => Object.create(d)) // co-occurences
+const nodes = data.nodes.map(d => Object.create(d)) // characters
 
-window.addEventListener("resize", drawChart)
+// set up the graph
+const simulation = d3
+  .forceSimulation(nodes) // define the 'galaxy'
+  .force("link", d3.forceLink(links) // show links between nodes
+  .id(d => d.id)) // give each node an id
+  .force("charge", d3.forceManyBody()) // add gravity to each node
+  .force("center", d3.forceCenter(width / 2, height / 2)) // attract nodes to the center of the svg
 
-drawChart()
+const svg = d3.select("svg")
+    .attr('width', width)
+    .attr('height', height)
+
+// visualise links between characters
+const link = svg
+  .append("g") // group, used to cascade CSS properties
+    .attr("stroke", "#999")
+    .attr("stroke-opacity", 0.6)
+  .selectAll("line")
+  .data(links) // every circle is bound to a character
+  .join("line") // ~ render(); adds, updates and removes nodes
+  .attr("stroke-width", d => Math.sqrt(d.value)) // try removing Math.sqrt
+
+// display characters as coloured circles
+const node = svg
+  .append("g")
+    .attr("stroke", "#fff")
+    .attr("stroke-width", 1.5)
+  .selectAll("circle")
+  .data(nodes)
+  .join("circle")
+    .attr("r", 5)
+    .attr("fill", d => scale(d.group)) // the scale defines node colur based on what group the character belongs to
+  .call(drag(simulation))
+
+// Is this making the visualization accessible?
+node.append("title")
+    .text(d => d.id) // title is equivalent to the `alt` on an <img>
+
+// The simulation re-renders with each tick
+// until alphaTarget is reached and the layout stops
+simulation.on("tick", () => {
+  // place circles on the svg
+  node
+    .attr("cx", d => d.x) // x coordinate of the center of circle
+    .attr("cy", d => d.y) // y coordinate of the center of circle
+
+  // draw lines between circles
+  link
+    .attr("x1", d => d.source.x) // line start x
+    .attr("y1", d => d.source.y) // line start y
+    .attr("x2", d => d.target.x) // line end x
+    .attr("y2", d => d.target.y) // line end y
+})
+
+// a force simulation like this has these parameters
+// - centering - attracts every node to a specific position
+// - collision - (try to) lay out circles without overlapping
+// - links - link strength is how close the nodes are together
+// - many-body - either a way to give each node gravity, or a joke param, not sure yet
+// - positioning - push each node towards a desired position
+
+// check out playground at
+// https://bl.ocks.org/steveharoz/8c3e2524079a8c440df60c1ab72b5d03
