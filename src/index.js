@@ -1,86 +1,102 @@
+import * as d3 from 'd3'
+import data from './les-miserables.json'
+
+// To visualise how elements interact
+// in a network or a hierarchy
+
+// alpha is the 'temperature' of the system
+
+const width = 600
+const height = 600
+
+const scale = d3.scaleOrdinal(d3.schemeCategory10);
+
+const drag = simulation => {
   
-import * as d3 from 'd3' 
-
-const data = [ 45, 67, 96, 84, 41, ]
-
-const drawChart = function () {
-  const paddingOuter = 10 // number of pixels for padding CSS property of the container (svg element)
-  const paddingInner = 0.1 // done by d3, percentage of step width
-  const containerWidth = window.innerWidth - (2 * paddingOuter)
-  const containerHeight = window.innerHeight - (2 * paddingOuter)
-  const svgWidth = containerWidth
-  const maximum = d3.max(data, d => d)
-
-  // scale = visual encoding of position of quantitative data, such as mapping a measurement in meters to a position in pixels for dots in a scatterplot, volume to a bubble size, color to local prevalence, stroke width to revenue, symbol size to popularity; aka as function linking domain and range
-
-  // scale types
-  // - linear - for time series, x = f(y) relationships
-  // - sqroot - for circles
-  // - power - for curves
-  // - log - for datasets with outliers
-  // - symlog - for history and prognoses
-
-  // domain = (outer bounds of) dataset, input data
-  // range = (outer bounds of) output data, raw data translated to visual representation
-
-  const xScale = d3.scaleBand()
-    .domain(Object.keys(data))
-      .range([0, svgWidth]) // [left edge, right edge]
-      .round(false) // round start and stop of each band to integers
-      .paddingInner(paddingInner) // proportion of the range that is reserved for blank space between bands
-      .align(0.5) // center bands versus range
-
-  const step = xScale.step()
-  const barWidth = step - (paddingInner * step)
+  function dragstarted(event) {
+    if (!event.active) {
+      simulation
+        .alphaTarget(0.8)
+        .restart()
+    }
+    event.subject.fx = event.subject.x;
+    event.subject.fy = event.subject.y;
+  }
   
-  const yScale = d3.scaleLinear()
-    .domain([0, maximum])
-    .range([0, containerHeight]) // [bottom edge, top edge], svg coordinates system is flipped
-
-  const selection = d3.select('svg')
-
-  const transition = selection.transition().duration(1000)
-
-  selection
-    .attr('width', () => svgWidth)
-    .attr('height', () => containerHeight)
-    .attr('style', () => `display: block; padding: ${paddingOuter}px;`)
-    .selectAll('rect')
-    .data(data, datum => `key-${datum}`) // key must be unique?, decides if node needs re-rendering on data change
-    .join(
-      // newly added nodes
-      enterSelection => {
-        // return so it can be joined with update selection
-        return enterSelection.append('rect')
-          // attributes to transition FROM
-          .attr('x', (datum, index) => xScale(index))
-          .attr('height', 0)
-          .attr('y', 0)
-          .attr('stroke-width', 3)
-          .attr('stroke-dasharray', '5 5')
-          .attr('stroke', 'darkblue')
-          .attr('fill', 'pink')
-        // set attributes etc. on only enter selection
-      },
-      update => update,
-      // newly removed nodes
-      exitSelection => {
-        exitSelection.transition(transition)
-          .attr('height', 0)
-          .attr('y', containerHeight)
-      }
-    )
-    .attr('width', barWidth)
-    // newly added nodes and newly updated nodes
-    .transition(transition)
-    // calculate x-position based index
-    .attr('x', (datum, index) => xScale(index))
-    // set height based on the bound datum
-    .attr('height', datum => yScale(datum))
-
+  function dragged(event) {
+    event.subject.fx = event.x;
+    event.subject.fy = event.y;
+  }
+  
+  function dragended(event) {
+    if (!event.active) simulation.alphaTarget(0);
+    event.subject.fx = null;
+    event.subject.fy = null;
+  }
+  
+  return d3.drag()
+      .on("start", dragstarted)
+      .on("drag", dragged)
+      .on("end", dragended);
 }
 
+const links = data.links.map(d => Object.create(d));
+const nodes = data.nodes.map(d => Object.create(d));
 
-window.addEventListener("resize", drawChart)
+const simulation = d3
+  .forceSimulation(nodes) // initialize physics
+  .force("link", d3.forceLink(links) // show links between nodes
+  .id(d => d.id)) // give each node an id
+  .force("charge", d3.forceManyBody()) // add repulsion between nodes
+  .force("center", d3.forceCenter(width / 2, height / 2)) // attract nodes to the center of the svg
 
-drawChart()
+const svg = d3.select("svg")
+    .attr('width', width)
+    .attr('height', height)
+
+const link = svg
+  .append("g")
+  .attr("stroke", "#999")
+  .attr("stroke-opacity", 0.6)
+  .selectAll("line")
+  .data(links)
+  .join("line")
+  .attr("stroke-width", d => Math.sqrt(d.value));
+
+const node = svg
+  .append("g")
+  .attr("stroke", "#fff")
+  .attr("stroke-width", 1.5)
+  .selectAll("circle")
+  .data(nodes)
+  .join("circle")
+  .attr("r", 5)
+  .attr("fill", d => scale(d.group))
+  .call(drag(simulation))
+
+node.append("title")
+    .text(d => d.id);
+
+simulation.on("tick", () => {
+  // update node positions
+  node
+    .attr("cx", d => d.x) // x coordinate of the center of a circle
+    .attr("cy", d => d.y) // y coordinate of the center of a circle
+
+  // update link positions
+  link
+    .attr("x1", d => d.source.x)
+    .attr("y1", d => d.source.y)
+    .attr("x2", d => d.target.x)
+    .attr("y2", d => d.target.y)
+})
+
+// force parameters
+// - centering - attracts every node to a specific position
+// - collision- consider nodes as circles with radius and try to avoid overlapping
+// - links - pushes linked nodes together, according to a link distance
+// - many-body - apply general attraction (if positive) or repulsion (if negative) between nodes
+// - positioning - push each node towards a desired position
+
+// check out playground at
+// https://bl.ocks.org/steveharoz/8c3e2524079a8c440df60c1ab72b5d03
